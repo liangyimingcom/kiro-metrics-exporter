@@ -1,0 +1,80 @@
+{
+  "name": "kiro-metrics-exporter",
+  "displayName": "Kiro Metrics Exporter",
+  "description": "Export metrics to AWS S3",
+  "version": "1.0.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/example/kiro-metrics-exporter.git"
+  },
+  "engines": {
+    "vscode": "^1.103.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "views": {
+      "explorer": [
+        {
+          "id": "metricsExporter",
+          "name": "Metrics Exporter",
+          "when": "true"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "metricsExporter.exportMetrics",
+        "title": "Export Metrics",
+        "icon": "$(cloud-upload)"
+      },
+      {
+        "command": "metricsExporter.refresh",
+        "title": "Refresh",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "metricsExporter.setAccessKey",
+        "title": "Set Access Key"
+      },
+      {
+        "command": "metricsExporter.setSecretKey",
+        "title": "Set Secret Key"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "metricsExporter.exportMetrics",
+          "when": "view == metricsExporter",
+          "group": "navigation"
+        },
+        {
+          "command": "metricsExporter.refresh",
+          "when": "view == metricsExporter",
+          "group": "navigation"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./"
+  },
+  "devDependencies": {
+    "@types/node": "^25.0.3",
+    "@types/vscode": "^1.103.0",
+    "@vscode/test-cli": "^0.0.12",
+    "@vscode/test-electron": "^2.5.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.957.0"
+  }
+}
