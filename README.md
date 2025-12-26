@@ -41,8 +41,10 @@ The extension generates CSV files with the following schema:
 ### S3 Path Structure
 Files are uploaded following this pattern:
 ```
-s3://bucket/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/year/month/day/00/kiro-ide-{userid}_timestamp.csv
+s3://bucket/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/year/month/day/00/kiro-ide-{userid}.csv
 ```
+
+**Note**: Uploads are idempotent - the same file path is used for each date/user combination, so repeated uploads will overwrite the previous file with the same data.
 
 ## Requirements
 

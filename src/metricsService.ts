@@ -434,7 +434,7 @@ export class MetricsService {
 
     /**
      * Generate S3 path following the pattern:
-     * s3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/year/month/day/00/kiro-ide-{userid}_timestamp.csv
+     * s3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/year/month/day/00/kiro-ide-{userid}.csv
      */
     private generateS3Path(date: string, userId: string, s3Prefix: string): { bucket: string; key: string } {
         // Parse the s3Prefix to extract bucket and base path
@@ -450,11 +450,8 @@ export class MetricsService {
         // Parse date (YYYY-MM-DD format)
         const [year, month, day] = date.split('-');
         
-        // Generate timestamp
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        
-        // Build the key following the pattern
-        const key = `${basePath}/${year}/${month}/${day}/00/kiro-ide-${userId}_${timestamp}.csv`;
+        // Build the key following the pattern (without timestamp for idempotent uploads)
+        const key = `${basePath}/${year}/${month}/${day}/00/kiro-ide-${userId}.csv`;
 
         return { bucket, key };
     }
@@ -594,12 +591,12 @@ export class MetricsService {
                 `✅ Successfully uploaded CSV for ${date}${filterLabel} to S3: s3://${bucket}/${key}`
             );
             
-            console.log(`CSV metrics uploaded successfully:
+            console.log(`CSV metrics uploaded successfully (idempotent):
                 S3: s3://${bucket}/${key}
                 Date: ${date}
                 User ID: ${userId}
                 Filter: ${filterType || 'all'}
-                Generated at: ${new Date().toISOString()}`);
+                Uploaded at: ${new Date().toISOString()}`);
                 
         } catch (error: any) {
             throw new Error(`S3 CSV upload failed for ${date}: ${error.message || error}`);
