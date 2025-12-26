@@ -153,12 +153,12 @@ export class MetricsService {
         });
 
         // Register commands for time-filtered metrics export
-        vscode.commands.registerCommand('metricsExporter.uploadLastMonth', async () => {
-            await this.exportMetricsWithTimeFilter('lastMonth');
-        });
-
         vscode.commands.registerCommand('metricsExporter.uploadLastWeek', async () => {
             await this.exportMetricsWithTimeFilter('lastWeek');
+        });
+
+        vscode.commands.registerCommand('metricsExporter.uploadAllTillYesterday', async () => {
+            await this.exportMetricsWithTimeFilter('allTillYesterday');
         });
     }
 
@@ -271,16 +271,17 @@ export class MetricsService {
 
     /**
      * Get date range for filtering
-     * @param filterType 'lastMonth' for T-30 to T-1, 'lastWeek' for T-7 to T-1
+     * @param filterType 'allTillYesterday' for all data up to T-1, 'lastWeek' for T-7 to T-1
      */
-    private getDateRange(filterType: 'lastMonth' | 'lastWeek'): { startDate: Date; endDate: Date } {
+    private getDateRange(filterType: 'allTillYesterday' | 'lastWeek'): { startDate: Date; endDate: Date } {
         const today = new Date();
         const endDate = new Date(today);
         endDate.setDate(today.getDate() - 1); // T-1 (yesterday)
         
-        const startDate = new Date(today);
-        if (filterType === 'lastMonth') {
-            startDate.setDate(today.getDate() - 30); // T-30
+        const startDate = new Date();
+        if (filterType === 'allTillYesterday') {
+            // Set to a very early date to include all available data
+            startDate.setFullYear(2020, 0, 1); // January 1, 2020
         } else {
             startDate.setDate(today.getDate() - 7); // T-7
         }
@@ -307,8 +308,8 @@ export class MetricsService {
     /**
      * Export metrics with time filter
      */
-    async exportMetricsWithTimeFilter(filterType: 'lastMonth' | 'lastWeek') {
-        const filterLabel = filterType === 'lastMonth' ? 'last month (T-30 to T-1)' : 'last week (T-7 to T-1)';
+    async exportMetricsWithTimeFilter(filterType: 'lastWeek' | 'allTillYesterday') {
+        const filterLabel = filterType === 'allTillYesterday' ? 'all data till yesterday' : 'last week (T-7 to T-1)';
         vscode.window.showInformationMessage(`Starting ${filterLabel} metrics export...`);
 
         if (!this.initializeS3()) {
@@ -560,7 +561,7 @@ export class MetricsService {
         outputChannel.show();
     }
 
-    private async uploadDayCSVToS3(csvData: string, date: string, userId: string, s3Prefix: string, filterType?: 'lastMonth' | 'lastWeek'): Promise<void> {
+    private async uploadDayCSVToS3(csvData: string, date: string, userId: string, s3Prefix: string, filterType?: 'lastWeek' | 'allTillYesterday'): Promise<void> {
         if (!this.s3Client) {
             throw new Error('S3 client not initialized');
         }
@@ -586,7 +587,7 @@ export class MetricsService {
             
             await this.s3Client.send(command);
             
-            const filterLabel = filterType ? ` (${filterType === 'lastMonth' ? 'last month' : 'last week'})` : '';
+            const filterLabel = filterType ? ` (${filterType === 'allTillYesterday' ? 'all till yesterday' : 'last week'})` : '';
             vscode.window.showInformationMessage(
                 `✅ Successfully uploaded CSV for ${date}${filterLabel} to S3: s3://${bucket}/${key}`
             );

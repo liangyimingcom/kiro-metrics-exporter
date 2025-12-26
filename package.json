@@ -109,8 +109,8 @@
         "icon": "$(cloud-upload)"
       },
       {
-        "command": "metricsExporter.uploadLastMonth",
-        "title": "Upload Last 30 Days",
+        "command": "metricsExporter.uploadAllTillYesterday",
+        "title": "Upload All Till Yesterday",
         "icon": "$(cloud-upload)"
       }
     ],
@@ -122,7 +122,7 @@
           "group": "navigation"
         },
         {
-          "command": "metricsExporter.uploadLastMonth",
+          "command": "metricsExporter.uploadAllTillYesterday",
           "when": "view == metricsExporter",
           "group": "navigation"
         }

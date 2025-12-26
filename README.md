@@ -28,7 +28,7 @@ A VSCode extension that exports Kiro IDE usage metrics to AWS S3.
 ### Export Metrics
 Use the buttons in the panel header:
 - **Upload Last 7 Days**: Export metrics for the past week (T-7 to T-1)
-- **Upload Last 30 Days**: Export metrics for the past month (T-30 to T-1)
+- **Upload All Till Yesterday**: Export all available metrics data up to yesterday (T-1)
 
 ### CSV Output Format
 The extension generates CSV files with the following schema:
