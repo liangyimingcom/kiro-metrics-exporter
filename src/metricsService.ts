@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { S3Client, PutObjectCommand } from '@aws-sdk/client-s3';
+import { IdentitystoreClient, GetUserIdCommand } from '@aws-sdk/client-identitystore';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -8,6 +9,7 @@ import { MetricsExport } from './types';
 
 export class MetricsService {
     private s3Client: S3Client | null = null;
+    private identityStoreClient: IdentitystoreClient | null = null;
 
     constructor() {
         this.registerCommands();
@@ -43,6 +45,72 @@ export class MetricsService {
             }
         });
 
+        // Register commands for setting S3 prefix
+        vscode.commands.registerCommand('metricsExporter.setS3Prefix', async () => {
+            const s3Prefix = await vscode.window.showInputBox({
+                prompt: 'Enter S3 prefix path',
+                placeHolder: 's3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/',
+                validateInput: (value) => {
+                    if (!value || value.trim() === '') {
+                        return 'Please enter an S3 prefix path';
+                    }
+                    if (!value.startsWith('s3://')) {
+                        return 'S3 prefix should start with s3://';
+                    }
+                    return null;
+                }
+            });
+            
+            if (s3Prefix) {
+                await vscode.workspace.getConfiguration().update('metricsExporter.aws.s3Prefix', s3Prefix, vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage('S3 prefix saved');
+                this.refreshTreeView();
+            }
+        });
+
+        vscode.commands.registerCommand('metricsExporter.setUserId', async () => {
+            const username = await vscode.window.showInputBox({
+                prompt: 'Enter Username',
+                placeHolder: 'e.g., john.doe or john.doe@company.com',
+                validateInput: (value) => {
+                    if (!value || value.trim() === '') {
+                        return 'Please enter a username';
+                    }
+                    return null;
+                }
+            });
+            
+            if (username) {
+                try {
+                    const userId = await this.getUserIdByUsername(username.trim());
+                    await vscode.workspace.getConfiguration().update('metricsExporter.aws.userId', userId, vscode.ConfigurationTarget.Global);
+                    vscode.window.showInformationMessage(`User ID resolved and saved: ${userId}`);
+                    this.refreshTreeView();
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to resolve user ID: ${error}`);
+                }
+            }
+        });
+
+        vscode.commands.registerCommand('metricsExporter.setIdentityStoreId', async () => {
+            const identityStoreId = await vscode.window.showInputBox({
+                prompt: 'Enter Identity Store ID',
+                placeHolder: 'e.g., d-1234567890 or 12345678-1234-1234-1234-123456789012',
+                validateInput: (value) => {
+                    if (!value || value.trim() === '') {
+                        return 'Please enter an Identity Store ID';
+                    }
+                    return null;
+                }
+            });
+            
+            if (identityStoreId) {
+                await vscode.workspace.getConfiguration().update('metricsExporter.aws.identityStoreId', identityStoreId, vscode.ConfigurationTarget.Global);
+                vscode.window.showInformationMessage('Identity Store ID saved');
+                this.refreshTreeView();
+            }
+        });
+
         // Register commands for time-filtered metrics export
         vscode.commands.registerCommand('metricsExporter.uploadLastMonth', async () => {
             await this.exportMetricsWithTimeFilter('lastMonth');
@@ -62,21 +130,101 @@ export class MetricsService {
         const accessKey = config.get<string>('aws.accessKey');
         const secretKey = config.get<string>('aws.secretKey');
         const region = config.get<string>('aws.region', 'us-east-1');
+        const s3Prefix = config.get<string>('aws.s3Prefix');
+        const userId = config.get<string>('aws.userId');
+        const identityStoreId = config.get<string>('aws.identityStoreId');
 
         if (!accessKey || !secretKey) {
             vscode.window.showErrorMessage('AWS credentials not configured. Please set Access Key and Secret Key.');
             return false;
         }
 
+        if (!s3Prefix) {
+            vscode.window.showErrorMessage('S3 prefix not configured. Please set S3 prefix path.');
+            return false;
+        }
+
+        if (!userId) {
+            vscode.window.showErrorMessage('User ID not configured. Please set User ID by username.');
+            return false;
+        }
+
+        if (!identityStoreId) {
+            vscode.window.showErrorMessage('Identity Store ID not configured. Please set Identity Store ID.');
+            return false;
+        }
+
+        const credentials = {
+            accessKeyId: accessKey,
+            secretAccessKey: secretKey
+        };
+
         this.s3Client = new S3Client({
             region: region,
-            credentials: {
-                accessKeyId: accessKey,
-                secretAccessKey: secretKey
-            }
+            credentials: credentials
+        });
+
+        this.identityStoreClient = new IdentitystoreClient({
+            region: region,
+            credentials: credentials
         });
 
         return true;
+    }
+
+    /**
+     * Get User ID by username using AWS Identity Store
+     */
+    private async getUserIdByUsername(username: string): Promise<string> {
+        const config = vscode.workspace.getConfiguration('metricsExporter');
+        const accessKey = config.get<string>('aws.accessKey');
+        const secretKey = config.get<string>('aws.secretKey');
+        const region = config.get<string>('aws.region', 'us-east-1');
+        const identityStoreId = config.get<string>('aws.identityStoreId');
+
+        if (!accessKey || !secretKey) {
+            throw new Error('AWS credentials not configured');
+        }
+
+        if (!identityStoreId) {
+            throw new Error('Identity Store ID not configured');
+        }
+
+        // Initialize Identity Store client if not already done
+        if (!this.identityStoreClient) {
+            this.identityStoreClient = new IdentitystoreClient({
+                region: region,
+                credentials: {
+                    accessKeyId: accessKey,
+                    secretAccessKey: secretKey
+                }
+            });
+        }
+
+        try {
+            const command = new GetUserIdCommand({
+                IdentityStoreId: identityStoreId,
+                AlternateIdentifier: {
+                    UniqueAttribute: {
+                        AttributePath: 'userName',
+                        AttributeValue: username
+                    }
+                }
+            });
+
+            const response = await this.identityStoreClient.send(command);
+            
+            if (!response.UserId) {
+                throw new Error('User ID not found in response');
+            }
+
+            return response.UserId;
+        } catch (error: any) {
+            if (error.name === 'ResourceNotFoundException') {
+                throw new Error(`User '${username}' not found in Identity Store`);
+            }
+            throw new Error(`Failed to get user ID: ${error.message || error}`);
+        }
     }
 
     /**
@@ -166,28 +314,41 @@ export class MetricsService {
 
             vscode.window.showInformationMessage(`Found ${Object.keys(filteredDailyStats).length} days of data for ${filterLabel}`);
             
-            // Convert to CSV format
-            const csvData = this.convertMetricsToCSV(filteredMetricsData);
+            // Get configuration
+            const config = vscode.workspace.getConfiguration('metricsExporter');
+            const s3Prefix = config.get<string>('aws.s3Prefix')!;
+            const userId = config.get<string>('aws.userId')!;
             
-            // Upload CSV to S3 with time filter label
-            await this.uploadCSVToS3(csvData, metricsData.summary, filterType);
+            // Upload separate CSV file for each day
+            let uploadCount = 0;
+            for (const [date, dailyStats] of Object.entries(filteredDailyStats)) {
+                try {
+                    // Convert single day data to CSV
+                    const csvData = this.convertDayMetricsToCSV(date, dailyStats, userId);
+                    
+                    // Upload to S3 with proper path structure
+                    await this.uploadDayCSVToS3(csvData, date, userId, s3Prefix, filterType);
+                    uploadCount++;
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to upload data for ${date}: ${error}`);
+                }
+            }
             
             // Also show a summary report in output channel
             const report = generateReport(results);
             this.showReportInOutput(report);
             
-            vscode.window.showInformationMessage(`${filterLabel} metrics exported successfully!`);
+            vscode.window.showInformationMessage(`${filterLabel} metrics exported successfully! Uploaded ${uploadCount} files.`);
         } catch (error) {
             vscode.window.showErrorMessage(`Export failed: ${error}`);
         }
     }
 
     /**
-     * Convert metrics data to CSV format
+     * Convert metrics data to CSV format for a specific date
      * CSV Schema: UserId,Date,Chat_AICodeLines,Chat_MessagesInteracted,Chat_MessagesSent,... (other columns set to 0)
-     * We focus on: UserId, Date, Chat_AICodeLines, Chat_MessagesSent
      */
-    private convertMetricsToCSV(metricsData: MetricsExport): string {
+    private convertDayMetricsToCSV(date: string, dailyStats: any, userId: string): string {
         const csvHeaders = [
             'UserId', 'Date', 'Chat_AICodeLines', 'Chat_MessagesInteracted', 'Chat_MessagesSent',
             'CodeFix_AcceptanceEventCount', 'CodeFix_AcceptedLines', 'CodeFix_GeneratedLines', 'CodeFix_GenerationEventCount',
@@ -205,37 +366,56 @@ export class MetricsService {
         const csvRows: string[] = [];
         csvRows.push(csvHeaders.join(','));
 
-        // Generate a placeholder user ID (will be implemented later)
-        const userId = 'placeholder-user-id';
+        // Format date as MM-DD-YYYY to match the example format
+        const formattedDate = this.formatDateForCSV(date);
+        
+        // Calculate Chat_AICodeLines using net lines (same calculation as in extractor)
+        const chatAICodeLines = dailyStats.fsWriteLines + dailyStats.strReplaceAdded - dailyStats.strReplaceDeleted;
+        
+        // Calculate Chat_MessagesSent (using execution count as proxy for messages sent)
+        const chatMessagesSent = dailyStats.executionCount;
 
-        // Process daily stats to create CSV rows
-        for (const [date, dailyStats] of Object.entries(metricsData.dailyStats)) {
-            // Format date as MM-DD-YYYY to match the example format
-            const formattedDate = this.formatDateForCSV(date);
-            
-            // Calculate Chat_AICodeLines using net lines (same calculation as in extractor)
-            const chatAICodeLines = dailyStats.fsWriteLines + dailyStats.strReplaceAdded - dailyStats.strReplaceDeleted;
-            
-            // Calculate Chat_MessagesSent (using execution count as proxy for messages sent)
-            const chatMessagesSent = dailyStats.executionCount;
+        // Create row with our data and zeros for other columns
+        const row = [
+            `"${userId}"`,
+            formattedDate,
+            chatAICodeLines.toString(),
+            '0', // Chat_MessagesInteracted - set to 0 for now
+            chatMessagesSent.toString(),
+            // All other columns set to 0
+            ...new Array(csvHeaders.length - 5).fill('0')
+        ];
 
-            // Create row with our data and zeros for other columns
-            const row = [
-                `"${userId}"`,
-                formattedDate,
-                chatAICodeLines.toString(),
-                '0', // Chat_MessagesInteracted - set to 0 for now
-                chatMessagesSent.toString(),
-                // All other columns set to 0
-                ...new Array(csvHeaders.length - 5).fill('0')
-            ];
-
-            csvRows.push(row.join(','));
-        }
-
+        csvRows.push(row.join(','));
         return csvRows.join('\n');
     }
 
+    /**
+     * Generate S3 path following the pattern:
+     * s3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/year/month/day/00/kiro-ide-{userid}_timestamp.csv
+     */
+    private generateS3Path(date: string, userId: string, s3Prefix: string): { bucket: string; key: string } {
+        // Parse the s3Prefix to extract bucket and base path
+        // Expected format: s3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/
+        const s3Match = s3Prefix.match(/^s3:\/\/([^\/]+)\/(.+)$/);
+        if (!s3Match) {
+            throw new Error('Invalid S3 prefix format. Expected: s3://bucketName/prefix/AWSLogs/accountId/KiroLogs/by_user_analytic/Region/');
+        }
+
+        const bucket = s3Match[1];
+        const basePath = s3Match[2].replace(/\/$/, ''); // Remove trailing slash if present
+
+        // Parse date (YYYY-MM-DD format)
+        const [year, month, day] = date.split('-');
+        
+        // Generate timestamp
+        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
+        
+        // Build the key following the pattern
+        const key = `${basePath}/${year}/${month}/${day}/00/kiro-ide-${userId}_${timestamp}.csv`;
+
+        return { bucket, key };
+    }
     /**
      * Format date from YYYY-MM-DD to MM-DD-YYYY format
      */
@@ -304,17 +484,31 @@ export class MetricsService {
             // Generate metrics export data
             const metricsData = exportToJson(results);
             
-            // Convert to CSV format
-            const csvData = this.convertMetricsToCSV(metricsData);
+            // Get configuration
+            const config = vscode.workspace.getConfiguration('metricsExporter');
+            const s3Prefix = config.get<string>('aws.s3Prefix')!;
+            const userId = config.get<string>('aws.userId')!;
             
-            // Upload CSV to S3
-            await this.uploadCSVToS3(csvData, metricsData.summary);
+            // Upload separate CSV file for each day
+            let uploadCount = 0;
+            for (const [date, dailyStats] of Object.entries(metricsData.dailyStats)) {
+                try {
+                    // Convert single day data to CSV
+                    const csvData = this.convertDayMetricsToCSV(date, dailyStats, userId);
+                    
+                    // Upload to S3 with proper path structure
+                    await this.uploadDayCSVToS3(csvData, date, userId, s3Prefix);
+                    uploadCount++;
+                } catch (error) {
+                    vscode.window.showErrorMessage(`Failed to upload data for ${date}: ${error}`);
+                }
+            }
             
             // Also show a summary report in output channel
             const report = generateReport(results);
             this.showReportInOutput(report);
             
-            vscode.window.showInformationMessage('Metrics exported successfully!');
+            vscode.window.showInformationMessage(`Metrics exported successfully! Uploaded ${uploadCount} files.`);
         } catch (error) {
             vscode.window.showErrorMessage(`Export failed: ${error}`);
         }
@@ -379,57 +573,46 @@ export class MetricsService {
         outputChannel.show();
     }
 
-    private async uploadCSVToS3(csvData: string, summary: any, filterType?: 'lastMonth' | 'lastWeek'): Promise<void> {
+    private async uploadDayCSVToS3(csvData: string, date: string, userId: string, s3Prefix: string, filterType?: 'lastMonth' | 'lastWeek'): Promise<void> {
         if (!this.s3Client) {
             throw new Error('S3 client not initialized');
         }
 
-        // Generate a timestamped filename with filter type
-        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-        const bucketName = 'kiro-metrics-bucket'; // This should be configurable
-        
-        let key: string;
-        if (filterType) {
-            const filterLabel = filterType === 'lastMonth' ? 'last-month' : 'last-week';
-            key = `metrics/${timestamp}-kiro-metrics-${filterLabel}.csv`;
-        } else {
-            key = `metrics/${timestamp}-kiro-metrics.csv`;
-        }
-        
-        const command = new PutObjectCommand({
-            Bucket: bucketName,
-            Key: key,
-            Body: csvData,
-            ContentType: 'text/csv',
-            Metadata: {
-                'export-time': new Date().toISOString(),
-                'total-executions': summary.totalExecutions.toString(),
-                'net-lines': summary.netLines.toString(),
-                'filter-type': filterType || 'all'
-            }
-        });
-
         try {
-            vscode.window.showInformationMessage(`Uploading CSV to S3: s3://${bucketName}/${key}`);
+            // Generate S3 path following the specified pattern
+            const { bucket, key } = this.generateS3Path(date, userId, s3Prefix);
+            
+            const command = new PutObjectCommand({
+                Bucket: bucket,
+                Key: key,
+                Body: csvData,
+                ContentType: 'text/csv',
+                Metadata: {
+                    'export-time': new Date().toISOString(),
+                    'date': date,
+                    'user-id': userId,
+                    'filter-type': filterType || 'all'
+                }
+            });
+
+            vscode.window.showInformationMessage(`Uploading CSV to S3: s3://${bucket}/${key}`);
             
             await this.s3Client.send(command);
             
             const filterLabel = filterType ? ` (${filterType === 'lastMonth' ? 'last month' : 'last week'})` : '';
             vscode.window.showInformationMessage(
-                `✅ Successfully uploaded CSV metrics${filterLabel} to S3: s3://${bucketName}/${key}\n` +
-                `Total executions: ${summary.totalExecutions}\n` +
-                `Net lines generated: ${summary.netLines}`
+                `✅ Successfully uploaded CSV for ${date}${filterLabel} to S3: s3://${bucket}/${key}`
             );
             
             console.log(`CSV metrics uploaded successfully:
-                S3: s3://${bucketName}/${key}
+                S3: s3://${bucket}/${key}
+                Date: ${date}
+                User ID: ${userId}
                 Filter: ${filterType || 'all'}
-                Total executions: ${summary.totalExecutions}
-                Net lines: ${summary.netLines}
                 Generated at: ${new Date().toISOString()}`);
                 
         } catch (error: any) {
-            throw new Error(`S3 CSV upload failed: ${error.message || error}`);
+            throw new Error(`S3 CSV upload failed for ${date}: ${error.message || error}`);
         }
     }
 
