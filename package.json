@@ -3,6 +3,7 @@
   "displayName": "Kiro Metrics Exporter",
   "description": "Export metrics to AWS S3",
   "version": "1.0.0",
+  "publisher": "DiscreteTom",
   "author": {
     "name": "DiscreteTom",
     "email": "discrete_tom@outlook.com"
