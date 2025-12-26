@@ -275,15 +275,17 @@ export class MetricsService {
      */
     private getDateRange(filterType: 'allTillYesterday' | 'lastWeek'): { startDate: Date; endDate: Date } {
         const today = new Date();
-        const endDate = new Date(today);
-        endDate.setDate(today.getDate() - 1); // T-1 (yesterday)
         
-        const startDate = new Date();
+        // Create end date (yesterday) at end of day in local time (23:59:59.999)
+        const endDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 1, 23, 59, 59, 999);
+        
+        let startDate: Date;
         if (filterType === 'allTillYesterday') {
-            // Set to a very early date to include all available data
-            startDate.setFullYear(2020, 0, 1); // January 1, 2020
+            // Set to a very early date to include all available data (start of day)
+            startDate = new Date(2020, 0, 1, 0, 0, 0, 0); // January 1, 2020 00:00:00 in local time
         } else {
-            startDate.setDate(today.getDate() - 7); // T-7
+            // Last week: 7 days ago at start of day in local time (00:00:00)
+            startDate = new Date(today.getFullYear(), today.getMonth(), today.getDate() - 7, 0, 0, 0, 0);
         }
         
         return { startDate, endDate };
@@ -296,7 +298,11 @@ export class MetricsService {
         const filtered: Record<string, any> = {};
         
         for (const [dateStr, stats] of Object.entries(dailyStats)) {
-            const date = new Date(dateStr);
+            // Parse date string (YYYY-MM-DD) as local date at end of day (23:59:59.999)
+            // This ensures we include all data for that day
+            const [year, month, day] = dateStr.split('-').map(Number);
+            const date = new Date(year, month - 1, day, 23, 59, 59, 999); // month is 0-indexed
+            
             if (date >= startDate && date <= endDate) {
                 filtered[dateStr] = stats;
             }
