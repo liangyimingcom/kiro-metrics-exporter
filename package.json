@@ -70,16 +70,6 @@
     },
     "commands": [
       {
-        "command": "metricsExporter.exportMetrics",
-        "title": "Metrics Exporter: Export Metrics",
-        "icon": "$(cloud-upload)"
-      },
-      {
-        "command": "metricsExporter.refresh",
-        "title": "Metrics Exporter: Refresh",
-        "icon": "$(refresh)"
-      },
-      {
         "command": "metricsExporter.setAccessKey",
         "title": "Metrics Exporter: Set Access Key"
       },
@@ -93,30 +83,32 @@
       },
       {
         "command": "metricsExporter.setUserId",
-        "title": "Metrics Exporter: Set User ID (by Username)"
+        "title": "Metrics Exporter: Set User ID"
       },
       {
         "command": "metricsExporter.setIdentityStoreId",
         "title": "Metrics Exporter: Set Identity Store ID"
       },
       {
-        "command": "metricsExporter.uploadLastMonth",
-        "title": "Metrics Exporter: Upload Last Month"
+        "command": "metricsExporter.uploadLastWeek",
+        "title": "Upload Last 7 Days",
+        "icon": "$(cloud-upload)"
       },
       {
-        "command": "metricsExporter.uploadLastWeek",
-        "title": "Metrics Exporter: Upload Last Week"
+        "command": "metricsExporter.uploadLastMonth",
+        "title": "Upload Last 30 Days",
+        "icon": "$(cloud-upload)"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "metricsExporter.exportMetrics",
+          "command": "metricsExporter.uploadLastWeek",
           "when": "view == metricsExporter",
           "group": "navigation"
         },
         {
-          "command": "metricsExporter.refresh",
+          "command": "metricsExporter.uploadLastMonth",
           "when": "view == metricsExporter",
           "group": "navigation"
         }
