@@ -1,0 +1,107 @@
+# Changelog
+
+All notable changes to the Kiro Metrics Exporter extension will be documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.3.1] - 2026-05-19
+
+### Fixed
+
+- Stats dropped to zero for sessions after May 7, 2026, because Kiro changed execution-log tool names from camelCase (`fsWrite`/`strReplace`) to snake_case (`fs_write`/`str_replace`). The extractor now normalizes both naming conventions, so historical and new logs are counted consistently.
+
+## [1.3.0] - 2026-03-19
+
+### Added
+
+- Upload Today command and toolbar button for uploading current day metrics
+- Upload Today button appears leftmost in the toolbar
+
+### Changed
+
+- Auto-upload enabled by default (`metricsExporter.autoUpload.enabled` default changed from `false` to `true`)
+
+## [1.2.0] - 2026-03-17
+
+### Added
+
+- Auto-upload feature with configurable interval (`metricsExporter.autoUpload.enabled`, default: false)
+- Configurable auto-upload interval in hours (`metricsExporter.autoUpload.intervalHours`, default: 8, range: 1-168)
+- Auto-upload performs an immediate upload on startup, then repeats at the configured interval
+- Auto-upload runs in silent mode (no popup notifications, logs only)
+- Timer restarts automatically when auto-upload settings change
+
+### Fixed
+
+- Extension ID corrected from `undefined_publisher` to `DiscreteTom`
+
+## [1.1.0] - 2025-01-04
+
+### Added
+
+- Operation logging with daily log files
+- Log file viewer commands (Open Log File, Open Log Folder)
+- Detailed upload progress logging with timing statistics
+- Version info display at top of TreeView panel
+- Open Settings command in Step 4
+- Step 4: Logs & Settings section in TreeView
+- **Activity Bar Icon**: Dedicated sidebar icon for Metrics Exporter
+- **Step-by-Step Configuration**: 4-step organized configuration panel
+  - Step 1: AWS Credentials
+  - Step 2: User Identity
+  - Step 3: S3 Configuration
+  - Step 4: Logs & Settings
+- **Username Resolution**: Automatic User ID and Display Name resolution
+  - New `username` configuration field
+  - New `displayName` configuration field (auto-resolved)
+  - `Resolve User ID & Display Name` button
+  - Auto-resolve on username change in Settings
+- **S3 Permission Check**: Pre-upload permission verification
+  - `Check S3 Write Permission` button
+  - Detailed error messages for common issues
+- **Settings Page Improvements**:
+  - Configuration items ordered by step
+  - Step prefix labels (`[Step 1]`, `[Step 2]`, `[Step 3]`)
+  - Clickable links for resolve and permission check
+- **Logger Module**: Operation logging to local files
+  - Log location: `~/.kiro-metrics-exporter/logs/`
+  - Daily log files: `metrics-exporter-YYYY-MM-DD.log`
+- Configuration change listener for auto-resolve
+- Clickable links in Settings markdown descriptions
+- Settings page configuration ordering
+- Display Name resolution via DescribeUser API
+- S3 permission check functionality
+- Three-step configuration panel structure
+- Username field separate from User ID
+
+### Changed
+
+- TreeView reorganized into steps
+- Log format includes timestamps, log levels, and context
+- TreeView now has 4 steps instead of 3
+- Panel moved from Explorer sidebar to dedicated Activity Bar
+- User ID is now auto-resolved instead of manual input
+- Upload confirmation dialog for "Upload All" operation
+
+### Fixed
+
+- Minor UI improvements
+- Auto-resolve debounce timing
+- Error message clarity improvements
+
+## [1.0.0] - 2024-12-24
+
+### Added
+
+- Basic metrics collection from Kiro agent directory
+- S3 upload functionality
+- Time-filtered exports (Last 7 Days, All Till Yesterday)
+- AWS Identity Store integration for user lookup
+- Configuration panel in Explorer sidebar
+
+[1.3.1]: https://github.com/DiscreteTom/kiro-metrics-exporter/compare/v1.3.0...v1.3.1
+[1.3.0]: https://github.com/DiscreteTom/kiro-metrics-exporter/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/DiscreteTom/kiro-metrics-exporter/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/DiscreteTom/kiro-metrics-exporter/compare/v1.0.0...v1.1.0
+[1.0.0]: https://github.com/DiscreteTom/kiro-metrics-exporter/releases/tag/v1.0.0

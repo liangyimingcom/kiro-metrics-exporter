@@ -55,6 +55,18 @@ export function calculateStrReplaceLines(oldStr: string, newStr: string): { adde
 }
 
 /**
+ * 工具名归一化：兼容 Kiro 老格式(camelCase: fsWrite/strReplace)和
+ * 新格式(snake_case: fs_write/str_replace)。
+ * 命中文件写入工具时返回归一化后的名字('fsWrite'/'strReplace')，否则返回 null。
+ */
+function normalizeToolName(name: string | undefined): 'fsWrite' | 'strReplace' | null {
+  if (!name) return null;
+  if (name === 'fsWrite' || name === 'fs_write') return 'fsWrite';
+  if (name === 'strReplace' || name === 'str_replace') return 'strReplace';
+  return null;
+}
+
+/**
  * 从 messages 中提取 tool use，去重处理
  */
 function extractToolUsesFromMessages(
@@ -70,20 +82,20 @@ function extractToolUsesFromMessages(
     for (const entry of entries) {
       if (entry.type === 'toolUse') {
         const toolId = entry.id;
-        const toolName = entry.name;
+        const normalized = normalizeToolName(entry.name);
 
         // 去重：跳过已处理的 tool use
         if (toolId && seenToolIds.has(toolId)) {
           continue;
         }
 
-        if (toolName === 'fsWrite' || toolName === 'strReplace') {
+        if (normalized) {
           if (toolId) {
             seenToolIds.add(toolId);
           }
           toolUses.push({
             id: toolId,
-            name: toolName,
+            name: normalized,
             args: entry.args as ToolUse['args']
           });
         }
