@@ -149,6 +149,54 @@ npm run watch
 1. Click **📄 Open Log File** in Step 4
 2. Or navigate to `~/.kiro-metrics-exporter/logs/`
 
+## Linux / Ubuntu Support
+
+### Issue: "No valid code generation records found" on Linux
+
+When running Kiro IDE on Ubuntu/Linux (especially as root user), the plugin may fail to find code generation records, showing:
+
+```
+No valid code generation records found
+```
+
+### Root Cause
+
+On Linux, Kiro requires the `--no-sandbox` flag when running as root. Additionally, the `--user-data-dir` must point to `~/.config/Kiro` (not `~` or `/root`) so that the Kiro agent data is stored at the expected path:
+
+```
+~/.config/Kiro/User/globalStorage/kiro.kiroagent/
+```
+
+### Solution
+
+Start Kiro IDE with the correct flags:
+
+```bash
+kiro --no-sandbox --user-data-dir ~/.config/Kiro
+```
+
+**Important:**
+- ❌ `kiro --no-sandbox --user-data-dir /root` — **WRONG** (plugin cannot find data)
+- ❌ `kiro --no-sandbox --user-data-dir ~` — **WRONG** (plugin cannot find data)
+- ✅ `kiro --no-sandbox --user-data-dir ~/.config/Kiro` — **CORRECT**
+
+### Verification
+
+After restarting Kiro with the correct flags:
+1. Open the Metrics Exporter panel (📊 icon in Activity Bar)
+2. Click "📅 Upload Today" or "⏱️ Upload Last 7 Days"
+3. You should see scan results with valid execution records (not "No valid code generation records found")
+
+### Kiro Agent Data Path by Platform
+
+| Platform | Path |
+|----------|------|
+| Windows | `%APPDATA%\Kiro\User\globalStorage\kiro.kiroagent` |
+| macOS | `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent` |
+| Linux | `~/.config/Kiro/User/globalStorage/kiro.kiroagent` |
+
+> **Note:** This fix was contributed by a community user running Ubuntu 22.04 with Kiro IDE as root. The key insight is that `--user-data-dir` must be set to `~/.config/Kiro` to ensure all Kiro components (including the agent data) use the correct base directory.
+
 ## Changelog
 
 See [CHANGELOG.md](CHANGELOG.md) for version history.
