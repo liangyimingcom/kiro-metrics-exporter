@@ -5,6 +5,31 @@ All notable changes to the Kiro Metrics Exporter extension will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## Unreleased
+
+### Added
+
+- Kiro 1.0 ACP session support using `~/.kiro/sessions/**/messages.jsonl` and adjacent `session.json` metadata.
+- File-operation support for Kiro 1.0 tool names: `create`, `write`, `append`, `replace`, `fs_write`, `fs_append`, and `str_replace`.
+
+### Changed
+
+- Metrics collection now scans both the Kiro 1.0 session store and the legacy `globalStorage/kiro.kiroagent` store, then deduplicates overlapping execution IDs.
+- `Chat_MessagesSent` now counts actual user turns from `turn_start` events instead of approximating messages from code-generating executions.
+- `Chat_AICodeLines` is reconstructed from successful file operations and before/after content diffs. The existing CSV columns and S3 object-key format remain unchanged.
+- Documentation now distinguishes the extension's locally reconstructed Kiro IDE metrics from official enterprise activity reports.
+
+### Fixed
+
+- Preserved pre-1.0 history when the new Kiro session directory also exists.
+- Removed the fixed legacy internal-directory dependency by discovering execution logs across the historical workspace/storage-key layout.
+- Added legacy `create`, `write`, `append`, and `replace` action parsing with historical argument aliases.
+- Prevented an empty Kiro 1.0 record from hiding a complete legacy record with the same execution ID.
+- Kept Kiro 1.0 session scanning available when a platform-specific legacy path cannot be resolved, including Linux `XDG_CONFIG_HOME` support.
+- Excluded failed, rejected, denied, aborted, and cancelled file operations from Kiro 1.0 and legacy action totals.
+- Corrected pure insertion and pure deletion line counts when one side of a replacement is empty.
+- Preserved `completed`, `aborted`, `failed`, and `cancelled` execution states from ACP events.
+
 ## [1.3.1] - 2026-05-19
 
 ### Fixed

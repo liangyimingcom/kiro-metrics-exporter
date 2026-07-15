@@ -4,7 +4,7 @@ import { IdentitystoreClient, GetUserIdCommand, DescribeUserCommand } from '@aws
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { scanKiroAgentDirectory, generateReport, exportToJson } from './extractor';
+import { scanKiroMetricsDirectories, generateReport, exportToJson } from './extractor';
 import { MetricsExport } from './types';
 import { logger } from './logger';
 
@@ -548,28 +548,28 @@ export class MetricsService {
         }
 
         try {
-            // Get the platform-specific kiro.kiroagent directory path
-            const kiroAgentPath = this.getKiroAgentPath();
-            
-            // Check if kiro.kiroagent directory exists
-            if (!fs.existsSync(kiroAgentPath)) {
-                logger.error(logContext, `Failed - kiro.kiroagent directory not found at: ${kiroAgentPath}`);
-                vscode.window.showErrorMessage(`kiro.kiroagent directory not found at: ${kiroAgentPath}`);
+            const candidatePaths = this.getKiroMetricsPaths();
+            const kiroDataPaths = candidatePaths.filter(candidatePath => fs.existsSync(candidatePath));
+
+            if (kiroDataPaths.length === 0) {
+                const checkedPaths = candidatePaths.join(', ');
+                logger.error(logContext, `Failed - Kiro metrics data directories not found. Checked: ${checkedPaths}`);
+                vscode.window.showErrorMessage(`Kiro metrics data directories not found. Checked: ${checkedPaths}`);
                 return;
             }
 
             // === Scanning Phase ===
             const scanStartTime = Date.now();
-            logger.info(logContext, `[Scanning] Started - Directory: ${kiroAgentPath}`);
-            if (!silent) { vscode.window.showInformationMessage(`Scanning directory: ${kiroAgentPath}`); }
+            const sourceDescription = kiroDataPaths.join(', ');
+            logger.info(logContext, `[Scanning] Started - Directories: ${sourceDescription}`);
+            if (!silent) { vscode.window.showInformationMessage(`Scanning Kiro metrics directories: ${sourceDescription}`); }
 
-            // Use the same scanning logic as the standalone version
-            const results = scanKiroAgentDirectory(kiroAgentPath);
+            const results = scanKiroMetricsDirectories(kiroDataPaths);
             const scanElapsed = ((Date.now() - scanStartTime) / 1000).toFixed(2);
 
             if (results.length === 0) {
-                logger.warn(logContext, `[Scanning] Completed in ${scanElapsed}s - No valid code generation records found`);
-                vscode.window.showWarningMessage('No valid code generation records found');
+                logger.warn(logContext, `[Scanning] Completed in ${scanElapsed}s - No valid Kiro session or code generation records found`);
+                vscode.window.showWarningMessage('No valid Kiro session or code generation records found');
                 return;
             }
             
@@ -736,31 +736,41 @@ export class MetricsService {
     }
 
     /**
-     * Get the platform-specific kiro.kiroagent directory path
+     * Get Kiro 1.0 and legacy metrics data directories in priority order.
+     * Both are scanned when present so upgraded installations keep pre-1.0 history.
      */
-    private getKiroAgentPath(): string {
-        const platform = os.platform();
-        
-        switch (platform) {
-            case 'win32':
-                // Windows: %APPDATA%\Kiro\User\globalStorage\kiro.kiroagent
-                const appData = process.env.APPDATA;
-                if (!appData) {
-                    throw new Error('APPDATA environment variable not found');
-                }
-                return path.join(appData, 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
-                
+    private getKiroMetricsPaths(): string[] {
+        const homeDirectory = os.homedir();
+        const sessionsPath = path.join(homeDirectory, '.kiro', 'sessions');
+        const candidates = [sessionsPath];
+        const legacySegments = ['Kiro', 'User', 'globalStorage', 'kiro.kiroagent'];
+
+        switch (os.platform()) {
+            case 'win32': {
+                // APPDATA normally exists, but its absence must not prevent Kiro 1.0
+                // sessions from being scanned.
+                const appData = process.env.APPDATA || path.join(homeDirectory, 'AppData', 'Roaming');
+                candidates.push(path.join(appData, ...legacySegments));
+                break;
+            }
             case 'darwin':
-                // macOS: ~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent
-                return path.join(os.homedir(), 'Library', 'Application Support', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
-                
-            case 'linux':
-                // Linux: ~/.config/Kiro/User/globalStorage/kiro.kiroagent
-                return path.join(os.homedir(), '.config', 'Kiro', 'User', 'globalStorage', 'kiro.kiroagent');
-                
+                candidates.push(path.join(homeDirectory, 'Library', 'Application Support', ...legacySegments));
+                break;
+            case 'linux': {
+                // Respect XDG_CONFIG_HOME while retaining the historical ~/.config path.
+                if (process.env.XDG_CONFIG_HOME) {
+                    candidates.push(path.join(process.env.XDG_CONFIG_HOME, ...legacySegments));
+                }
+                candidates.push(path.join(homeDirectory, '.config', ...legacySegments));
+                break;
+            }
             default:
-                throw new Error(`Unsupported platform: ${platform}`);
+                // Kiro 1.0 sessions are platform-neutral; an unknown platform should
+                // not disable that source just because no legacy path is known.
+                break;
         }
+
+        return Array.from(new Set(candidates));
     }
 
     async exportMetrics() {
@@ -771,22 +781,19 @@ export class MetricsService {
         }
 
         try {
-            // Get the platform-specific kiro.kiroagent directory path
-            const kiroAgentPath = this.getKiroAgentPath();
-            
-            // Check if kiro.kiroagent directory exists
-            if (!fs.existsSync(kiroAgentPath)) {
-                vscode.window.showErrorMessage(`kiro.kiroagent directory not found at: ${kiroAgentPath}`);
+            const candidatePaths = this.getKiroMetricsPaths();
+            const kiroDataPaths = candidatePaths.filter(candidatePath => fs.existsSync(candidatePath));
+
+            if (kiroDataPaths.length === 0) {
+                vscode.window.showErrorMessage(`Kiro metrics data directories not found. Checked: ${candidatePaths.join(', ')}`);
                 return;
             }
 
-            vscode.window.showInformationMessage(`Scanning directory: ${kiroAgentPath}`);
-
-            // Use the same scanning logic as the standalone version
-            const results = scanKiroAgentDirectory(kiroAgentPath);
+            vscode.window.showInformationMessage(`Scanning Kiro metrics directories: ${kiroDataPaths.join(', ')}`);
+            const results = scanKiroMetricsDirectories(kiroDataPaths);
 
             if (results.length === 0) {
-                vscode.window.showWarningMessage('No valid code generation records found');
+                vscode.window.showWarningMessage('No valid Kiro session or code generation records found');
                 return;
             }
 

@@ -2,7 +2,16 @@
 
 [![Open VSX Version](https://img.shields.io/open-vsx/v/DiscreteTom/kiro-metrics-exporter)](https://open-vsx.org/extension/DiscreteTom/kiro-metrics-exporter)
 
-A VSCode extension that exports Kiro IDE usage metrics to AWS S3.
+A VSCode extension that exports locally reconstructed Kiro IDE usage metrics to AWS S3.
+
+## Kiro 1.0 metrics
+
+Kiro 1.0 introduced two relevant changes:
+
+1. **Official enterprise reporting:** The legacy `by_user_analytic` report covers CLI and plugin usage, not the Kiro IDE metrics exported by this extension. Newer per-client reports may expose high-level `KIRO_IDE` activity such as conversations, credits, and messages, but they do not provide `Chat_AICodeLines` and may not be available in every environment. See the [official per-user activity documentation](https://kiro.dev/docs/cli/enterprise/monitor-and-track/user-activity/).
+2. **Local session persistence:** The IDE now stores ACP session events in `~/.kiro/sessions/**/messages.jsonl`. This extension parses successful `create`, `write`, `append`, `replace`, `fs_write`, `fs_append`, and `str_replace` tool calls from those JSONL files to estimate `Chat_AICodeLines`. On upgraded installations it also discovers pre-1.0 execution logs across the historical workspace/storage-key layout under `globalStorage/kiro.kiroagent`, without depending on one fixed internal storage key. Overlapping execution IDs prefer Kiro 1.0 data, with a legacy fallback only when the modern record has no code operations.
+
+The local calculation is a compatibility estimate, not a replacement for Kiro's official telemetry. In particular, local session files do not provide authoritative credit, overage, inline-completion, or acceptance metrics. A `replace_all` call is conservatively counted as one replacement because the persisted event does not expose the historical match count.
 
 ## Setup
 
@@ -106,11 +115,12 @@ Example log:
 
 ### Kiro Agent Data Location
 
-| Platform | Path                                                                   |
-| -------- | ---------------------------------------------------------------------- |
-| Windows  | `%APPDATA%\Kiro\User\globalStorage\kiro.kiroagent`                     |
-| macOS    | `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent` |
-| Linux    | `~/.config/Kiro/User/globalStorage/kiro.kiroagent`                     |
+| Kiro version | Platform | Path                                                                   |
+| ------------ | -------- | ---------------------------------------------------------------------- |
+| 1.0+         | All      | `~/.kiro/sessions`                                                     |
+| Legacy source | Windows  | `%APPDATA%\Kiro\User\globalStorage\kiro.kiroagent`                   |
+| Legacy source | macOS    | `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent` |
+| Legacy source | Linux    | `~/.config/Kiro/User/globalStorage/kiro.kiroagent`                     |
 
 ## Development
 
@@ -140,62 +150,14 @@ npm run watch
 | -------------------------------------- | ------------------------------------------------------------------------------------------------ |
 | User resolution fails                  | Check Identity Store ID and credentials                                                          |
 | S3 permission denied                   | Verify IAM policy has PutObject permission                                                       |
-| No data found                          | Ensure Kiro agent directory exists with activity data                                            |
+| No data found                          | On Kiro 1.0+, verify `~/.kiro/sessions` contains session folders with `messages.jsonl`; older versions use the legacy globalStorage path |
 | Upload fails                           | Check S3 prefix format (must start with `s3://`)                                                 |
-| Stats drop to zero after May 2026 | Kiro changed log tool names from camelCase (`fsWrite`/`strReplace`) to snake_case (`fs_write`/`str_replace`) around May 7, 2026. Fixed in v1.3.1+ — upgrade to the latest extension. |
+| Stats drop to zero after May 2026      | Use a build with Kiro 1.0 ACP JSONL support; older releases only understand legacy globalStorage logs |
 
 ### View Logs
 
 1. Click **📄 Open Log File** in Step 4
 2. Or navigate to `~/.kiro-metrics-exporter/logs/`
-
-## Linux / Ubuntu Support
-
-### Issue: "No valid code generation records found" on Linux
-
-When running Kiro IDE on Ubuntu/Linux (especially as root user), the plugin may fail to find code generation records, showing:
-
-```
-No valid code generation records found
-```
-
-### Root Cause
-
-On Linux, Kiro requires the `--no-sandbox` flag when running as root. Additionally, the `--user-data-dir` must point to `~/.config/Kiro` (not `~` or `/root`) so that the Kiro agent data is stored at the expected path:
-
-```
-~/.config/Kiro/User/globalStorage/kiro.kiroagent/
-```
-
-### Solution
-
-Start Kiro IDE with the correct flags:
-
-```bash
-kiro --no-sandbox --user-data-dir ~/.config/Kiro
-```
-
-**Important:**
-- ❌ `kiro --no-sandbox --user-data-dir /root` — **WRONG** (plugin cannot find data)
-- ❌ `kiro --no-sandbox --user-data-dir ~` — **WRONG** (plugin cannot find data)
-- ✅ `kiro --no-sandbox --user-data-dir ~/.config/Kiro` — **CORRECT**
-
-### Verification
-
-After restarting Kiro with the correct flags:
-1. Open the Metrics Exporter panel (📊 icon in Activity Bar)
-2. Click "📅 Upload Today" or "⏱️ Upload Last 7 Days"
-3. You should see scan results with valid execution records (not "No valid code generation records found")
-
-### Kiro Agent Data Path by Platform
-
-| Platform | Path |
-|----------|------|
-| Windows | `%APPDATA%\Kiro\User\globalStorage\kiro.kiroagent` |
-| macOS | `~/Library/Application Support/Kiro/User/globalStorage/kiro.kiroagent` |
-| Linux | `~/.config/Kiro/User/globalStorage/kiro.kiroagent` |
-
-> **Note:** This fix was contributed by a community user running Ubuntu 22.04 with Kiro IDE as root. The key insight is that `--user-data-dir` must be set to `~/.config/Kiro` to ensure all Kiro components (including the agent data) use the correct base directory.
 
 ## Changelog
 

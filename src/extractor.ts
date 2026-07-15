@@ -34,8 +34,8 @@ export function calculateStrReplaceLines(oldStr: string, newStr: string): { adde
     return { added: 0, deleted: 0 };
   }
 
-  const oldLines = (oldStr || '').split('\n');
-  const newLines = (newStr || '').split('\n');
+  const oldLines = oldStr ? oldStr.split('\n') : [];
+  const newLines = newStr ? newStr.split('\n') : [];
 
   // 使用 diffArrays 进行逐行对比（与 Python unified_diff 行为一致）
   const changes = Diff.diffArrays(oldLines, newLines);
@@ -55,15 +55,111 @@ export function calculateStrReplaceLines(oldStr: string, newStr: string): { adde
 }
 
 /**
- * 工具名归一化：兼容 Kiro 老格式(camelCase: fsWrite/strReplace)和
- * 新格式(snake_case: fs_write/str_replace)。
- * 命中文件写入工具时返回归一化后的名字('fsWrite'/'strReplace')，否则返回 null。
+ * 工具名归一化：兼容 Kiro 旧日志和 Kiro 1.0 ACP JSONL 中的命名。
  */
-function normalizeToolName(name: string | undefined): 'fsWrite' | 'strReplace' | null {
+type NormalizedToolName = 'fsWrite' | 'fsAppend' | 'strReplace';
+
+function normalizeToolName(name: string | undefined): NormalizedToolName | null {
   if (!name) return null;
-  if (name === 'fsWrite' || name === 'fs_write') return 'fsWrite';
-  if (name === 'strReplace' || name === 'str_replace') return 'strReplace';
+  if (name === 'fsWrite' || name === 'fs_write' || name === 'create') return 'fsWrite';
+  if (name === 'fsAppend' || name === 'fs_append') return 'fsAppend';
+  if (name === 'strReplace' || name === 'str_replace' || name === 'write' || name === 'append' || name === 'replace') return 'strReplace';
   return null;
+}
+
+function getStringArg(args: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = args[key];
+    if (typeof value === 'string') {
+      return value;
+    }
+  }
+  return '';
+}
+
+function normalizeToolArgs(args: Record<string, unknown> | undefined): NonNullable<ToolUse['args']> {
+  const raw = args || {};
+  return {
+    path: getStringArg(raw, ['path', 'file', 'filePath', 'file_path', 'targetFile', 'target_file']),
+    text: getStringArg(raw, ['text', 'content', 'modifiedContent', 'modified_content']),
+    oldStr: getStringArg(raw, ['oldStr', 'old_str', 'oldText', 'old_text', 'old_string', 'originalContent', 'original_content']),
+    newStr: getStringArg(raw, ['newStr', 'new_str', 'newText', 'new_text', 'new_string', 'modifiedContent', 'modified_content'])
+  };
+}
+
+function hasMetricToolArgs(name: NormalizedToolName, args: NonNullable<ToolUse['args']>): boolean {
+  if (name === 'fsWrite' || name === 'fsAppend') {
+    return Boolean(args.text);
+  }
+  return Boolean(args.oldStr || args.newStr);
+}
+
+function normalizeToolUse(
+  name: string | undefined,
+  rawArgs: Record<string, unknown> | undefined
+): { name: NormalizedToolName; args: NonNullable<ToolUse['args']> } | null {
+  let normalizedName = normalizeToolName(name);
+  const raw = rawArgs || {};
+  const args = normalizeToolArgs(raw);
+  const hasBeforeState = [
+    'oldStr',
+    'old_str',
+    'oldText',
+    'old_text',
+    'old_string',
+    'originalContent',
+    'original_content'
+  ].some(key => Object.prototype.hasOwnProperty.call(raw, key));
+
+  // Some legacy generic write/append records contain only the written text,
+  // while newer records contain complete before/after content. Preserve the
+  // operation semantics for the text-only form and use a diff when possible.
+  if (name === 'write' && !hasBeforeState && args.text) {
+    normalizedName = 'fsWrite';
+  } else if (name === 'append' && !hasBeforeState && args.text) {
+    normalizedName = 'fsAppend';
+  }
+
+  if (!normalizedName || !hasMetricToolArgs(normalizedName, args)) {
+    return null;
+  }
+  return { name: normalizedName, args };
+}
+
+function isFailedOperationStatus(status: string | undefined): boolean {
+  if (!status) return false;
+  return ['failed', 'cancelled', 'canceled', 'rejected', 'denied', 'aborted']
+    .includes(status.toLowerCase());
+}
+
+function applyToolUse(result: ExecutionResult, toolUse: ToolUse): void {
+  const args = toolUse.args || {};
+  const normalizedName = toolUse.name as NormalizedToolName;
+  if (!hasMetricToolArgs(normalizedName, args)) return;
+
+  if (toolUse.name === 'fsWrite' || toolUse.name === 'fsAppend') {
+    const text = args.text || '';
+    const lines = countLines(text);
+    result.fsWriteLines += lines;
+    result.fileOperations.push({
+      type: toolUse.name,
+      path: args.path || '',
+      lines
+    });
+    return;
+  }
+
+  if (toolUse.name === 'strReplace') {
+    const { added, deleted } = calculateStrReplaceLines(args.oldStr || '', args.newStr || '');
+    result.strReplaceAdded += added;
+    result.strReplaceDeleted += deleted;
+    result.fileOperations.push({
+      type: 'strReplace',
+      path: args.path || '',
+      added,
+      deleted
+    });
+  }
 }
 
 /**
@@ -75,31 +171,27 @@ function extractToolUsesFromMessages(
 ): ToolUse[] {
   const toolUses: ToolUse[] = [];
 
-  if (!messages) return toolUses;
+  if (!Array.isArray(messages)) return toolUses;
 
   for (const msg of messages) {
-    const entries = msg.entries || [];
+    const entries = Array.isArray(msg?.entries) ? msg.entries : [];
     for (const entry of entries) {
-      if (entry.type === 'toolUse') {
-        const toolId = entry.id;
-        const normalized = normalizeToolName(entry.name);
+      if (entry.type !== 'toolUse') continue;
 
-        // 去重：跳过已处理的 tool use
-        if (toolId && seenToolIds.has(toolId)) {
-          continue;
-        }
-
-        if (normalized) {
-          if (toolId) {
-            seenToolIds.add(toolId);
-          }
-          toolUses.push({
-            id: toolId,
-            name: normalized,
-            args: entry.args as ToolUse['args']
-          });
-        }
+      const toolId = entry.id;
+      const normalized = normalizeToolUse(entry.name, entry.args);
+      if (!normalized || (toolId && seenToolIds.has(toolId))) {
+        continue;
       }
+
+      if (toolId) {
+        seenToolIds.add(toolId);
+      }
+      toolUses.push({
+        id: toolId,
+        name: normalized.name,
+        args: normalized.args
+      });
     }
   }
 
@@ -107,7 +199,9 @@ function extractToolUsesFromMessages(
 }
 
 /**
- * 从 actions 数组中提取文件操作
+ * 从 actions 数组中提取文件操作。
+ * 旧版 Kiro 曾经把 create/write/append/replace 记录在 actions 中，
+ * 因此这里和 messages 使用同一套工具名及参数归一化逻辑。
  */
 function extractToolUsesFromActions(
   actions: ExecutionLog['actions'],
@@ -115,32 +209,30 @@ function extractToolUsesFromActions(
 ): ToolUse[] {
   const toolUses: ToolUse[] = [];
 
-  if (!actions) return toolUses;
+  if (!Array.isArray(actions)) return toolUses;
 
   for (const action of actions) {
-    const actionType = action.actionType;
     const actionId = action.actionId;
-
-    if (actionType === 'create' && actionId) {
-      if (seenToolIds.has(actionId)) {
-        continue;
-      }
-
-      seenToolIds.add(actionId);
-
-      const input = action.input || {};
-      if (input.modifiedContent) {
-        toolUses.push({
-          id: actionId,
-          name: 'fsWrite',
-          args: {
-            path: input.file || '',
-            text: input.modifiedContent
-          },
-          emittedAt: action.emittedAt
-        });
-      }
+    const actionStatus = action.actionState || action.status || action.state;
+    if (!actionId || seenToolIds.has(actionId) || isFailedOperationStatus(actionStatus)) {
+      continue;
     }
+
+    const normalized = normalizeToolUse(
+      action.actionType,
+      action.input as Record<string, unknown> | undefined
+    );
+    if (!normalized) {
+      continue;
+    }
+
+    seenToolIds.add(actionId);
+    toolUses.push({
+      id: actionId,
+      name: normalized.name,
+      args: normalized.args,
+      emittedAt: action.emittedAt
+    });
   }
 
   return toolUses;
@@ -191,6 +283,7 @@ export function processExecutionLog(
     endTime,
     status: data.status || 'unknown',
     workflowType: data.workflowType || 'unknown',
+    isUserTurn: true,
     fsWriteLines: 0,
     strReplaceAdded: 0,
     strReplaceDeleted: 0,
@@ -198,94 +291,407 @@ export function processExecutionLog(
   };
 
   const seenToolIds = new Set<string>();
+  if (Array.isArray(data.actions)) {
+    for (const action of data.actions) {
+      const actionStatus = action.actionState || action.status || action.state;
+      if (action.actionId && isFailedOperationStatus(actionStatus)) {
+        // A failed action is authoritative for the matching message/tool ID.
+        seenToolIds.add(action.actionId);
+      }
+    }
+  }
 
-  // 从 actions 中提取
-  const actionsToolUses = extractToolUsesFromActions(data.actions, seenToolIds);
-
-  // 从 context.messages 中提取
+  // context.messages 通常保留的参数比 actions 摘要更完整，因此优先采用；
+  // 若 message 缺少可计参数，则不会占用 tool ID，actions 仍可回退补充。
   const messagesToolUses = extractToolUsesFromMessages(
     data.context?.messages,
     seenToolIds
   );
 
-  const allToolUses = [...actionsToolUses, ...messagesToolUses];
+  const actionsToolUses = extractToolUsesFromActions(data.actions, seenToolIds);
+  const allToolUses = [...messagesToolUses, ...actionsToolUses];
 
   // 处理 tool uses
   for (const toolUse of allToolUses) {
-    const toolName = toolUse.name;
-    const args = toolUse.args || {};
-
-    if (toolName === 'fsWrite') {
-      const text = args.text || '';
-      const lines = countLines(text);
-      result.fsWriteLines += lines;
-      result.fileOperations.push({
-        type: 'fsWrite',
-        path: args.path || '',
-        lines
-      });
-    } else if (toolName === 'strReplace') {
-      const oldStr = args.oldStr || '';
-      const newStr = args.newStr || '';
-      const { added, deleted } = calculateStrReplaceLines(oldStr, newStr);
-      result.strReplaceAdded += added;
-      result.strReplaceDeleted += deleted;
-      result.fileOperations.push({
-        type: 'strReplace',
-        path: args.path || '',
-        added,
-        deleted
-      });
-    }
+    applyToolUse(result, toolUse);
   }
 
   return result;
 }
 
-/**
- * 扫描 kiro.kiroagent 目录，提取所有执行日志
- */
-export function scanKiroAgentDirectory(basePath: string): ExecutionResult[] {
-  const results: ExecutionResult[] = [];
-  const seenExecutionIds = new Set<string>();
+interface KiroSessionPayload {
+  type?: string;
+  executionId?: string;
+  parentExecutionId?: string;
+  toolCallId?: string;
+  toolName?: string;
+  args?: Record<string, unknown>;
+  status?: string;
+  stopReason?: string;
+  success?: boolean;
+  agentType?: string;
+  category?: string;
+  context?: {
+    executionId?: string;
+    status?: string;
+  };
+  _meta?: {
+    kiro?: {
+      agentMode?: string;
+    };
+  };
+}
 
-  // 查找所有 hash 命名的会话文件夹
+interface KiroSessionEvent {
+  id?: string;
+  timestamp?: string | number;
+  payload?: KiroSessionPayload;
+}
+
+interface KiroSessionMetadata {
+  agentMode?: string;
+}
+
+function parseTimestamp(value: string | number | undefined): Date | null {
+  if (value === undefined) return null;
+  const milliseconds = typeof value === 'number' ? value : Date.parse(value);
+  const date = new Date(milliseconds);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function readSessionMode(messagesFilePath: string): string {
+  const metadataPath = path.join(path.dirname(messagesFilePath), 'session.json');
+  try {
+    const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8')) as KiroSessionMetadata;
+    return metadata.agentMode || 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+function createExecutionResult(executionId: string, startTime: Date | null, workflowType: string): ExecutionResult {
+  return {
+    executionId,
+    startTime,
+    endTime: null,
+    status: 'running',
+    workflowType,
+    isUserTurn: false,
+    fsWriteLines: 0,
+    strReplaceAdded: 0,
+    strReplaceDeleted: 0,
+    fileOperations: []
+  };
+}
+
+function isSuccessfulToolCall(payload: KiroSessionPayload, resultSuccess: boolean | undefined): boolean {
+  const status = payload.status?.toLowerCase();
+  if (resultSuccess === false || isFailedOperationStatus(status)) {
+    return false;
+  }
+
+  return resultSuccess === true || status === 'completed' || status === 'complete' || status === 'succeeded' || status === 'success';
+}
+
+interface PendingKiroToolCall {
+  executionId: string;
+  status?: string;
+  toolUse: ToolUse;
+}
+
+/**
+ * 处理 Kiro 1.0 的单个 messages.jsonl 会话文件。
+ * JSONL 可能正在被 Kiro 追加写入，因此损坏或不完整的单行会被忽略。
+ */
+export function processKiroSessionMessagesFile(filePath: string): ExecutionResult[] {
+  let content: string;
+  try {
+    content = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  const sessionMode = readSessionMode(filePath);
+  const executions = new Map<string, ExecutionResult>();
+  const pendingToolCalls = new Map<string, PendingKiroToolCall>();
+  const toolResultStatus = new Map<string, boolean>();
+
+  const processLine = (line: string): void => {
+    if (!line.trim()) return;
+
+    let event: KiroSessionEvent;
+    try {
+      event = JSON.parse(line) as KiroSessionEvent;
+    } catch {
+      // The final line can be incomplete while Kiro is writing the session.
+      return;
+    }
+
+    const payload = event.payload;
+    if (!payload) return;
+
+    if (payload.type === 'tool_result' && payload.toolCallId && typeof payload.success === 'boolean') {
+      toolResultStatus.set(payload.toolCallId, payload.success);
+    }
+
+    const executionId = payload.executionId || payload.context?.executionId;
+    if (!executionId) return;
+
+    const timestamp = parseTimestamp(event.timestamp);
+    let result = executions.get(executionId);
+    if (!result) {
+      result = createExecutionResult(executionId, timestamp, sessionMode);
+      executions.set(executionId, result);
+    }
+
+    const eventMode = payload._meta?.kiro?.agentMode || payload.agentType;
+    if (eventMode && result.workflowType === 'unknown') {
+      result.workflowType = eventMode;
+    }
+
+    if (payload.type === 'turn_start') {
+      if (timestamp) result.startTime = timestamp;
+      result.status = 'running';
+      result.isUserTurn = true;
+      return;
+    }
+
+    if (payload.type === 'tool_call') {
+      const normalized = normalizeToolUse(payload.toolName, payload.args);
+      const toolCallId = payload.toolCallId || event.id;
+      if (!normalized || !toolCallId) return;
+
+      pendingToolCalls.set(toolCallId, {
+        executionId,
+        status: payload.status,
+        toolUse: {
+          id: toolCallId,
+          name: normalized.name,
+          args: normalized.args
+        }
+      });
+      return;
+    }
+
+    if (payload.type === 'usage_summary') {
+      if (timestamp) result.endTime = timestamp;
+      result.status = payload.status || result.status;
+      return;
+    }
+
+    if (payload.type === 'session_event' && payload.category === 'session_pause') {
+      if (timestamp) result.endTime = timestamp;
+      result.status = payload.context?.status || result.status;
+      return;
+    }
+
+    if (payload.type === 'turn_end') {
+      if (timestamp) result.endTime = timestamp;
+      const stopReason = payload.stopReason?.toLowerCase();
+      if (stopReason === 'cancelled' || stopReason === 'aborted' || stopReason === 'failed') {
+        result.status = stopReason;
+      } else if (!['aborted', 'failed', 'cancelled'].includes(result.status.toLowerCase())) {
+        result.status = 'completed';
+      }
+    }
+  };
+
+  let lineStart = 0;
+  while (lineStart < content.length) {
+    const newlineIndex = content.indexOf('\n', lineStart);
+    const lineEnd = newlineIndex === -1 ? content.length : newlineIndex;
+    const line = content.slice(lineStart, lineEnd).replace(/\r$/, '');
+    processLine(line);
+    if (newlineIndex === -1) break;
+    lineStart = newlineIndex + 1;
+  }
+
+  for (const [toolCallId, pending] of pendingToolCalls) {
+    if (!isSuccessfulToolCall({ status: pending.status }, toolResultStatus.get(toolCallId))) continue;
+    const result = executions.get(pending.executionId);
+    if (result) {
+      applyToolUse(result, pending.toolUse);
+    }
+  }
+
+  return Array.from(executions.values())
+    .filter(result => result.startTime !== null)
+    .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime());
+}
+
+function collectSessionMessageFiles(basePath: string, files: string[]): void {
   let entries: fs.Dirent[];
   try {
-    entries = fs.readdirSync(basePath, { withFileTypes: true });
+    entries = fs.readdirSync(basePath, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
   } catch {
-    console.error(`无法读取目录: ${basePath}`);
-    return results;
+    return;
   }
 
   for (const entry of entries) {
-    if (!entry.isDirectory()) continue;
+    const entryPath = path.join(basePath, entry.name);
+    if (entry.isDirectory()) {
+      collectSessionMessageFiles(entryPath, files);
+    } else if (entry.isFile() && entry.name === 'messages.jsonl') {
+      files.push(entryPath);
+    }
+  }
+}
 
-    // 执行日志在 {hash}/414d1636299d2b9e4ce7e17fb11f63e9/ 目录下
-    const logDir = path.join(basePath, entry.name, '414d1636299d2b9e4ce7e17fb11f63e9');
+function getCodeActivity(result: ExecutionResult): number {
+  return result.fsWriteLines + result.strReplaceAdded + result.strReplaceDeleted;
+}
 
-    if (!fs.existsSync(logDir)) continue;
+function hasCodeActivity(result: ExecutionResult): boolean {
+  return getCodeActivity(result) > 0;
+}
 
-    let logFiles: fs.Dirent[];
-    try {
-      logFiles = fs.readdirSync(logDir, { withFileTypes: true });
-    } catch {
+function isMoreCompleteExecution(candidate: ExecutionResult, existing: ExecutionResult): boolean {
+  const candidateActivity = getCodeActivity(candidate);
+  const existingActivity = getCodeActivity(existing);
+  if (candidateActivity !== existingActivity) {
+    return candidateActivity > existingActivity;
+  }
+  if (candidate.fileOperations.length !== existing.fileOperations.length) {
+    return candidate.fileOperations.length > existing.fileOperations.length;
+  }
+  if (candidate.isUserTurn !== existing.isUserTurn) {
+    return candidate.isUserTurn === true;
+  }
+  return Boolean(candidate.endTime) && !existing.endTime;
+}
+
+function addBestExecution(results: Map<string, ExecutionResult>, candidate: ExecutionResult): void {
+  const existing = results.get(candidate.executionId);
+  if (!existing || isMoreCompleteExecution(candidate, existing)) {
+    if (existing?.isUserTurn === true) {
+      candidate.isUserTurn = true;
+    }
+    results.set(candidate.executionId, candidate);
+  } else if (candidate.isUserTurn === true) {
+    existing.isUserTurn = true;
+  }
+}
+
+/** 扫描 Kiro 1.0 ~/.kiro/sessions 目录。 */
+export function scanKiroSessionDirectory(basePath: string): ExecutionResult[] {
+  const messageFiles: string[] = [];
+  collectSessionMessageFiles(basePath, messageFiles);
+
+  const results = new Map<string, ExecutionResult>();
+  for (const messageFile of messageFiles) {
+    for (const result of processKiroSessionMessagesFile(messageFile)) {
+      addBestExecution(results, result);
+    }
+  }
+
+  return Array.from(results.values())
+    .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime());
+}
+
+function looksLikeJsonObjectFile(filePath: string): boolean {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(filePath, 'r');
+    const buffer = Buffer.alloc(256);
+    const bytesRead = fs.readSync(descriptor, buffer, 0, buffer.length, 0);
+    return /^[\s\uFEFF]*\{/.test(buffer.toString('utf8', 0, bytesRead));
+  } catch {
+    return false;
+  } finally {
+    if (descriptor !== undefined) {
+      try {
+        fs.closeSync(descriptor);
+      } catch {
+        // Ignore a close failure after a read failure.
+      }
+    }
+  }
+}
+
+function collectLegacyExecutionFiles(basePath: string, files: string[], depth = 0): void {
+  let entries: fs.Dirent[];
+  try {
+    entries = fs.readdirSync(basePath, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+  } catch {
+    return;
+  }
+
+  for (const entry of entries) {
+    const entryPath = path.join(basePath, entry.name);
+    // Historical layouts use {workspace}/{storage-key}/{execution-file}.
+    // The storage key may change, so inspect every key at that depth while
+    // avoiding nested databases and indexes unrelated to execution logs.
+    if (entry.isDirectory() && depth < 2) {
+      collectLegacyExecutionFiles(entryPath, files, depth + 1);
+    } else if (entry.isFile() && looksLikeJsonObjectFile(entryPath)) {
+      files.push(entryPath);
+    }
+  }
+}
+
+/**
+ * 扫描 Kiro metrics 数据目录。
+ * Kiro 1.0 使用 ~/.kiro/sessions；旧版本使用 globalStorage/kiro.kiroagent。
+ */
+export function scanKiroAgentDirectory(basePath: string): ExecutionResult[] {
+  if (path.basename(basePath) === 'sessions') {
+    return scanKiroSessionDirectory(basePath);
+  }
+
+  // 旧版布局为 {workspace}/{storage-key}/{execution-file}。不同版本的
+  // storage key 可能变化，因此扫描该历史布局中的所有 key，而不再硬编码 414d...。
+  const executionFiles: string[] = [];
+  collectLegacyExecutionFiles(basePath, executionFiles);
+
+  const results = new Map<string, ExecutionResult>();
+  for (const executionFile of executionFiles) {
+    // 每个文件先独立解析，再按 executionId 选择信息最完整的副本。
+    // 这样无操作的索引/快照文件不会遮蔽真正的执行日志。
+    const result = processExecutionLog(executionFile, new Set<string>());
+    if (!result?.startTime || Number.isNaN(result.startTime.getTime()) || !hasCodeActivity(result)) {
       continue;
     }
+    addBestExecution(results, result);
+  }
 
-    for (const logFile of logFiles) {
-      if (!logFile.isFile()) continue;
+  return Array.from(results.values())
+    .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime());
+}
 
-      const logFilePath = path.join(logDir, logFile.name);
-      const result = processExecutionLog(logFilePath, seenExecutionIds);
+/**
+ * 合并多个 Kiro 数据源。路径顺序代表优先级；通常 Kiro 1.0 sessions 在前。
+ * 相同 executionId 默认保留高优先级来源；仅当高优先级 modern 记录
+ * 完全没有代码操作时才回退到 legacy，避免空迁移记录吞掉历史数据，同时不让
+ * legacy 覆盖已有 modern 统计。
+ */
+export function scanKiroMetricsDirectories(basePaths: string[]): ExecutionResult[] {
+  const merged = new Map<string, ExecutionResult>();
 
-      if (result && (result.fsWriteLines > 0 || result.strReplaceAdded > 0 || result.strReplaceDeleted > 0)) {
-        results.push(result);
+  for (const basePath of basePaths) {
+    if (!fs.existsSync(basePath)) continue;
+    for (const result of scanKiroAgentDirectory(basePath)) {
+      const existing = merged.get(result.executionId);
+      if (!existing) {
+        merged.set(result.executionId, result);
+      } else {
+        const shouldFallbackToLegacy = existing.fileOperations.length === 0 && hasCodeActivity(result);
+
+        if (shouldFallbackToLegacy) {
+          // Keep the modern source's authoritative user-turn classification so
+          // a legacy internal execution cannot inflate Chat_MessagesSent.
+          if (existing.isUserTurn !== undefined) {
+            result.isUserTurn = existing.isUserTurn;
+          }
+          merged.set(result.executionId, result);
+        }
       }
     }
   }
 
-  return results;
+  return Array.from(merged.values())
+    .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime());
 }
 
 /**
@@ -346,7 +752,7 @@ export function aggregateByDate(results: ExecutionResult[]): Record<string, Dail
     dailyStats[dateKey].fsWriteLines += r.fsWriteLines;
     dailyStats[dateKey].strReplaceAdded += r.strReplaceAdded;
     dailyStats[dateKey].strReplaceDeleted += r.strReplaceDeleted;
-    dailyStats[dateKey].executionCount += 1;
+    dailyStats[dateKey].executionCount += r.isUserTurn === false ? 0 : 1;
 
     for (const op of r.fileOperations) {
       if (op.type === 'fsWrite') {
@@ -395,7 +801,7 @@ export function aggregateByMonth(results: ExecutionResult[]): Record<string, Mon
     monthlyData[monthKey].fsWriteLines += r.fsWriteLines;
     monthlyData[monthKey].strReplaceAdded += r.strReplaceAdded;
     monthlyData[monthKey].strReplaceDeleted += r.strReplaceDeleted;
-    monthlyData[monthKey].executionCount += 1;
+    monthlyData[monthKey].executionCount += r.isUserTurn === false ? 0 : 1;
     monthlyData[monthKey].activeDays.add(dateKey);
 
     for (const op of r.fileOperations) {
@@ -434,7 +840,7 @@ export function generateSummary(results: ExecutionResult[]): Summary {
   const totalStrReplaceDeleted = results.reduce((sum, r) => sum + r.strReplaceDeleted, 0);
 
   return {
-    totalExecutions: results.length,
+    totalExecutions: results.filter(r => r.isUserTurn !== false).length,
     totalFsWriteLines,
     totalStrReplaceAdded,
     totalStrReplaceDeleted,

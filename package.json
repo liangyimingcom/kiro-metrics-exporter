@@ -2,7 +2,7 @@
   "name": "kiro-metrics-exporter",
   "displayName": "Kiro Metrics Exporter",
   "description": "Export metrics to AWS S3",
-  "version": "1.3.1",
+  "version": "1.5.0",
   "publisher": "DiscreteTom",
   "author": {
     "name": "DiscreteTom",
@@ -40,7 +40,7 @@
       "properties": {
         "metricsExporter.version": {
           "type": "null",
-          "markdownDescription": "---\n\n### 📊 Kiro Metrics Exporter \n\n---",
+          "markdownDescription": "---\n\n### \ud83d\udcca Kiro Metrics Exporter \n\n---",
           "scope": "application",
           "order": 0
         },
@@ -80,7 +80,7 @@
           "type": "string",
           "default": "",
           "description": "[Step 2] Username for resolving User ID & Display Name",
-          "markdownDescription": "**[Step 2]** Username for resolving User ID & Display Name. After entering username, [👉 click here to resolve User ID & Display Name](command:metricsExporter.resolveUserId)",
+          "markdownDescription": "**[Step 2]** Username for resolving User ID & Display Name. After entering username, [\ud83d\udc49 click here to resolve User ID & Display Name](command:metricsExporter.resolveUserId)",
           "scope": "application",
           "order": 5
         },
@@ -104,7 +104,7 @@
           "type": "string",
           "default": "",
           "description": "[Step 3] S3 prefix path",
-          "markdownDescription": "**[Step 3]** S3 prefix path (e.g., `s3://bucket/prefix/`). After entering, [👉 click here to check S3 write permission](command:metricsExporter.checkS3Permission)",
+          "markdownDescription": "**[Step 3]** S3 prefix path (e.g., `s3://bucket/prefix/`). After entering, [\ud83d\udc49 click here to check S3 write permission](command:metricsExporter.checkS3Permission)",
           "scope": "application",
           "order": 8
         },
@@ -205,17 +205,17 @@
       },
       {
         "command": "metricsExporter.uploadToday",
-        "title": "📅 Upload Today",
+        "title": "\ud83d\udcc5 Upload Today",
         "icon": "$(calendar)"
       },
       {
         "command": "metricsExporter.uploadLastWeek",
-        "title": "⏱️ Upload Last 7 Days",
+        "title": "\u23f1\ufe0f Upload Last 7 Days",
         "icon": "$(history)"
       },
       {
         "command": "metricsExporter.uploadAllTillYesterday",
-        "title": "📤 Upload All Till Yesterday",
+        "title": "\ud83d\udce4 Upload All Till Yesterday",
         "icon": "$(cloud-upload)"
       }
     ],

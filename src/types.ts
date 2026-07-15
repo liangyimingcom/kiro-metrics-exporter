@@ -4,9 +4,9 @@
 
 /** 文件操作类型 */
 export interface FileOperation {
-  type: 'fsWrite' | 'strReplace';
+  type: 'fsWrite' | 'fsAppend' | 'strReplace';
   path: string;
-  lines?: number;      // fsWrite 时的行数
+  lines?: number;      // fsWrite/fsAppend 时的行数
   added?: number;      // strReplace 时的新增行数
   deleted?: number;    // strReplace 时的删除行数
 }
@@ -18,6 +18,8 @@ export interface ExecutionResult {
   endTime: Date | null;
   status: string;
   workflowType: string;
+  /** Kiro 用户 turn；内部/子 execution 不计入 Chat_MessagesSent。 */
+  isUserTurn?: boolean;
   fsWriteLines: number;
   strReplaceAdded: number;
   strReplaceDeleted: number;
@@ -88,11 +90,31 @@ export interface ExecutionAction {
   actionId?: string;
   actionType?: string;
   actionState?: string;
+  status?: string;
+  state?: string;
   emittedAt?: number;
   input?: {
+    [key: string]: unknown;
+    path?: string;
     file?: string;
+    filePath?: string;
+    file_path?: string;
+    targetFile?: string;
+    target_file?: string;
+    text?: string;
+    content?: string;
     modifiedContent?: string;
+    modified_content?: string;
     originalContent?: string;
+    original_content?: string;
+    oldStr?: string;
+    old_str?: string;
+    oldText?: string;
+    old_text?: string;
+    newStr?: string;
+    new_str?: string;
+    newText?: string;
+    new_text?: string;
   };
 }
 
