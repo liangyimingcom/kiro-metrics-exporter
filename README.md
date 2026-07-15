@@ -1,5 +1,30 @@
 # Kiro Metrics Exporter
 
+> **🎉 v1.5.0 — Full Compatibility with Kiro IDE Old & New Versions**
+>
+> The new kiro-metrics v1.5.0 plugin works seamlessly on both **Kiro IDE legacy (v0.12.333)** and **Kiro IDE new (v1.0.138)**. Historical data from older versions is fully preserved and searchable.
+>
+> **🎉 v1.5.0 — 全面兼容新旧版本 Kiro IDE**
+>
+> 新版 kiro-metrics v1.5.0 插件同时支持 **Kiro IDE 旧版 (v0.12.333)** 和 **新版 (v1.0.138)**，均能正常工作，旧数据可以正常检索。
+
+---
+
+## ⚡ Upgrade Notice / 升级提示
+
+**English:** No need to uninstall the old plugin — simply install v1.5.0 directly over the existing version. All your previous configurations (AWS credentials, S3 path, username, etc.) are preserved automatically. No reconfiguration required!
+
+**中文：** 老版本插件无需卸载，直接安装新插件 v1.5.0 即可正常使用。所有已有配置（AWS 凭证、S3 路径、用户名等）自动保留，**不需要重新配置！**
+
+### Quick Install / 快速安装
+
+1. Download `kiro-metrics-exporter-1.5.0.vsix` from this repository
+2. In Kiro IDE: Extensions panel → `...` menu → "Install from VSIX..."
+3. Select the downloaded `.vsix` file → Done! ✅
+
+---
+
+
 [![Open VSX Version](https://img.shields.io/open-vsx/v/DiscreteTom/kiro-metrics-exporter)](https://open-vsx.org/extension/DiscreteTom/kiro-metrics-exporter)
 
 A VSCode extension that exports locally reconstructed Kiro IDE usage metrics to AWS S3.
