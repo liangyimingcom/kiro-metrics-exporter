@@ -528,12 +528,21 @@ function collectSessionMessageFiles(basePath: string, files: string[]): void {
     return;
   }
 
+  // Spec 模式的委派/子执行记录在 sub-executions\{uuid}.jsonl 中，与顶层
+  // messages.jsonl 使用同一套事件格式（按 executionId 关联），但文件名不
+  // 是 messages.jsonl，因此需要单独放宽该目录下的文件名过滤。
+  const isSubExecutionsDir = path.basename(basePath) === 'sub-executions';
+
   for (const entry of entries) {
     const entryPath = path.join(basePath, entry.name);
     if (entry.isDirectory()) {
       collectSessionMessageFiles(entryPath, files);
-    } else if (entry.isFile() && entry.name === 'messages.jsonl') {
-      files.push(entryPath);
+    } else if (entry.isFile()) {
+      if (entry.name === 'messages.jsonl') {
+        files.push(entryPath);
+      } else if (isSubExecutionsDir && entry.name.endsWith('.jsonl')) {
+        files.push(entryPath);
+      }
     }
   }
 }
