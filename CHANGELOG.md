@@ -5,6 +5,17 @@ All notable changes to the Kiro Metrics Exporter extension will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.1] - 2026-10-14
+
+### Fixed
+
+- `fs_write` / `fs_append` calls that edit an existing file (newer Kiro versions send `originalContent` / `modifiedContent` instead of only `text`) were counted as if the whole file had been newly generated, or ignored entirely when the new content was empty. They are now counted as added/deleted lines using the same diff logic as `str_replace`. Calls that only carry `text` are counted exactly as before.
+- Spec-mode sub-agent executions stored in `sessions/**/sub-executions/*.jsonl` are now scanned. Version 1.5.0 skipped these files, which under-counted code written by delegated sub-agents.
+
+### Upgrade note
+
+- The line-count method changed for the cases above. Days that were already uploaded with an earlier version keep their old values until they are uploaded again (for example with "Upload All Till Yesterday"). Check that the destination overwrites the same day before re-uploading.
+
 ## Unreleased
 
 ### Added

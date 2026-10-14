@@ -89,7 +89,9 @@ function normalizeToolArgs(args: Record<string, unknown> | undefined): NonNullab
 
 function hasMetricToolArgs(name: NormalizedToolName, args: NonNullable<ToolUse['args']>): boolean {
   if (name === 'fsWrite' || name === 'fsAppend') {
-    return Boolean(args.text);
+    // oldStr is set when the call edits an existing file (originalContent). Keep
+    // it even if the new content is empty, so that clearing a file is counted.
+    return Boolean(args.text || args.oldStr);
   }
   return Boolean(args.oldStr || args.newStr);
 }
@@ -137,7 +139,14 @@ function applyToolUse(result: ExecutionResult, toolUse: ToolUse): void {
   const normalizedName = toolUse.name as NormalizedToolName;
   if (!hasMetricToolArgs(normalizedName, args)) return;
 
-  if (toolUse.name === 'fsWrite' || toolUse.name === 'fsAppend') {
+  // Newer Kiro versions let fs_write/fs_append edit an existing file. Those calls
+  // carry the whole file before/after (originalContent/modifiedContent), which
+  // normalizeToolArgs maps to oldStr/newStr(text). Counting `text` would treat the
+  // entire file as newly generated, so count only the changed lines instead.
+  const isEditOfExistingFile =
+    (toolUse.name === 'fsWrite' || toolUse.name === 'fsAppend') && Boolean(args.oldStr);
+
+  if ((toolUse.name === 'fsWrite' || toolUse.name === 'fsAppend') && !isEditOfExistingFile) {
     const text = args.text || '';
     const lines = countLines(text);
     result.fsWriteLines += lines;
@@ -149,8 +158,9 @@ function applyToolUse(result: ExecutionResult, toolUse: ToolUse): void {
     return;
   }
 
-  if (toolUse.name === 'strReplace') {
-    const { added, deleted } = calculateStrReplaceLines(args.oldStr || '', args.newStr || '');
+  if (toolUse.name === 'strReplace' || isEditOfExistingFile) {
+    const newContent = toolUse.name === 'strReplace' ? args.newStr : (args.newStr || args.text);
+    const { added, deleted } = calculateStrReplaceLines(args.oldStr || '', newContent || '');
     result.strReplaceAdded += added;
     result.strReplaceDeleted += deleted;
     result.fileOperations.push({
