@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.5.1] - 2026-10-14
 
+Details, upgrade steps and known issues (in Chinese): [docs/release-notes/v1.5.1.md](docs/release-notes/v1.5.1.md)
+
 ### Fixed
 
 - `fs_write` / `fs_append` calls that edit an existing file (newer Kiro versions send `originalContent` / `modifiedContent` instead of only `text`) were counted as if the whole file had been newly generated, or ignored entirely when the new content was empty. They are now counted as added/deleted lines using the same diff logic as `str_replace`. Calls that only carry `text` are counted exactly as before.
