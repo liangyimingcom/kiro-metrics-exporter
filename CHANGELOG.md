@@ -5,6 +5,16 @@ All notable changes to the Kiro Metrics Exporter extension will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.2] - 2026-11-10
+
+### Fixed
+
+- Reported code lines were too low when one `executionId` had tool calls spread across several session files (top-level `messages.jsonl`, `sub-executions/*.jsonl`). Only the single "most complete" copy was kept and the rest were dropped. Copies are now merged and de-duplicated by `toolCallId`, so every successful file operation is counted once.
+
+### Upgrade note
+
+- Days uploaded with 1.5.1 may be under-counted. Re-upload them (for example with "Upload All Till Yesterday") if the destination overwrites the same day.
+
 ## [1.5.1] - 2026-10-14
 
 Details, upgrade steps and known issues (in Chinese): [docs/release-notes/v1.5.1.md](docs/release-notes/v1.5.1.md)

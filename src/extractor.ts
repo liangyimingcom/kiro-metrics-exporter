@@ -413,7 +413,10 @@ interface PendingKiroToolCall {
  * 处理 Kiro 1.0 的单个 messages.jsonl 会话文件。
  * JSONL 可能正在被 Kiro 追加写入，因此损坏或不完整的单行会被忽略。
  */
-export function processKiroSessionMessagesFile(filePath: string): ExecutionResult[] {
+export function processKiroSessionMessagesFile(
+  filePath: string,
+  appliedToolCallIds: Set<string> = new Set<string>()
+): ExecutionResult[] {
   let content: string;
   try {
     content = fs.readFileSync(filePath, 'utf-8');
@@ -518,8 +521,11 @@ export function processKiroSessionMessagesFile(filePath: string): ExecutionResul
 
   for (const [toolCallId, pending] of pendingToolCalls) {
     if (!isSuccessfulToolCall({ status: pending.status }, toolResultStatus.get(toolCallId))) continue;
+    // 跨文件去重：同一个 toolCallId 只计一次
+    if (appliedToolCallIds.has(toolCallId)) continue;
     const result = executions.get(pending.executionId);
     if (result) {
+      appliedToolCallIds.add(toolCallId);
       applyToolUse(result, pending.toolUse);
     }
   }
@@ -597,15 +603,54 @@ export function scanKiroSessionDirectory(basePath: string): ExecutionResult[] {
   const messageFiles: string[] = [];
   collectSessionMessageFiles(basePath, messageFiles);
 
+  // 同一个 executionId 的工具调用可能分散在多个文件里（顶层 messages.jsonl、
+  // sub-executions/*.jsonl、续写的会话）。这里按 toolCallId 去重后累加合并，
+  // 而不是只保留其中一份，否则其余文件里的代码行数会丢失。
   const results = new Map<string, ExecutionResult>();
+  const appliedToolCallIds = new Set<string>();
   for (const messageFile of messageFiles) {
-    for (const result of processKiroSessionMessagesFile(messageFile)) {
-      addBestExecution(results, result);
+    for (const result of processKiroSessionMessagesFile(messageFile, appliedToolCallIds)) {
+      const existing = results.get(result.executionId);
+      if (!existing) {
+        results.set(result.executionId, result);
+      } else {
+        mergeExecutionInto(existing, result);
+      }
     }
   }
 
   return Array.from(results.values())
     .sort((a, b) => a.startTime!.getTime() - b.startTime!.getTime());
+}
+
+/** 把 source 合并进 target（同一 executionId 来自不同文件）。 */
+function mergeExecutionInto(target: ExecutionResult, source: ExecutionResult): void {
+  target.fsWriteLines += source.fsWriteLines;
+  target.strReplaceAdded += source.strReplaceAdded;
+  target.strReplaceDeleted += source.strReplaceDeleted;
+  target.fileOperations.push(...source.fileOperations);
+
+  if (source.isUserTurn === true) {
+    // 以含 turn_start 的记录为准，起始时间取其时间
+    if (target.isUserTurn !== true && source.startTime) {
+      target.startTime = source.startTime;
+    } else if (source.startTime && target.startTime && source.startTime < target.startTime) {
+      target.startTime = source.startTime;
+    }
+    target.isUserTurn = true;
+  } else if (target.isUserTurn !== true && source.startTime && target.startTime && source.startTime < target.startTime) {
+    target.startTime = source.startTime;
+  }
+
+  if (source.endTime && (!target.endTime || source.endTime > target.endTime)) {
+    target.endTime = source.endTime;
+  }
+  if (target.workflowType === 'unknown') {
+    target.workflowType = source.workflowType;
+  }
+  if (target.status === 'running' && source.status !== 'running') {
+    target.status = source.status;
+  }
 }
 
 function looksLikeJsonObjectFile(filePath: string): boolean {
